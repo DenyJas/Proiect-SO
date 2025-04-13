@@ -17,7 +17,7 @@ typedef struct comoara {
 } Comoara_t;
 
 void add(char *huntID, Comoara_t comoara) {
-    mkdir(huntID, 0755); // Dacă există deja, nu e problemă
+    mkdir(huntID, 0755); 
 
     char filename[100];
     snprintf(filename, sizeof(filename), "%s/%s", huntID, comoara.ID);
@@ -55,12 +55,9 @@ int list(char *huntID) {
     printf("Hunt: %s\n", huntID);
 
     while ((entry = readdir(dir)) != NULL) {
-        // Verifică că nu sunt directoare speciale "." și ".."
         if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
             char filepath[300];
             snprintf(filepath, sizeof(filepath), "%s/%s", huntID, entry->d_name);
-
-            // Verifică dacă fișierul este un fișier regulat
             if (stat(filepath, &fileStat) == 0 && S_ISREG(fileStat.st_mode)) {
                 totalSize += fileStat.st_size;
                 if (fileStat.st_mtime > lastModTime)
@@ -79,8 +76,6 @@ int list(char *huntID) {
         if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
             char filepath[300];
             snprintf(filepath, sizeof(filepath), "%s/%s", huntID, entry->d_name);
-
-            // Verifică dacă fișierul este un fișier regulat
             if (stat(filepath, &fileStat) == 0 && S_ISREG(fileStat.st_mode)) {
                 printf("- %s\n", entry->d_name);
             }
