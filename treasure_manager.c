@@ -2,122 +2,154 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h>
 #include <dirent.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-volatile sig_atomic_t got_command = 0;
+volatile sig_atomic_t signal_flag = 0;
 
-void sigusr1_handler(int sig) {
-    got_command = 1;
+void signal_handler(int sig) {
+    signal_flag = 1;
 }
 
-void list_hunts() {
-    DIR *d = opendir(".");
-    if (!d) {
-        perror("Could not open directory");
+int is_valid_treasure(const char *name) {
+    return strcmp(name, ".") != 0 &&
+           strcmp(name, "..") != 0 &&
+           strstr(name, "log") == NULL;
+}
+
+int is_valid_hunt(const char *name) {
+    return name[0] != '.' &&
+           strcmp(name, "logged_hunt") != 0 &&
+           strcmp(name, ".vscode") != 0;
+}
+
+void enumerate_hunts() {
+    DIR *root = opendir(".");
+    if (!root) {
+        perror("Cannot open current directory");
         return;
     }
-    struct dirent *entry;
-    while ((entry = readdir(d))) {
-        if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
-            int count = 0;
-            char subdir[256];
-            snprintf(subdir, sizeof(subdir), "%s", entry->d_name);
-            DIR *sub = opendir(subdir);
-            if (sub) {
-                struct dirent *e;
-                while ((e = readdir(sub))) {
-                    if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) {
-                        count++;
-                    }
+
+    struct dirent *item;
+    while ((item = readdir(root)) != NULL) {
+        if (item->d_type == DT_DIR &&
+            is_valid_hunt(item->d_name)) {
+
+            char folder_path[512];
+            snprintf(folder_path, sizeof(folder_path), "%s", item->d_name);
+
+            DIR *hunt = opendir(folder_path);
+            if (!hunt) continue;
+
+            int treasure_total = 0;
+            struct dirent *entry;
+            while ((entry = readdir(hunt)) != NULL) {
+                if (entry->d_type == DT_REG && is_valid_treasure(entry->d_name)) {
+                    treasure_total++;
                 }
-                closedir(sub);
             }
-            printf("Hunt: %s - Treasures: %d\n", entry->d_name, count);
+
+            printf("Hunt: %s | Treasures: %d\n", item->d_name, treasure_total);
+            closedir(hunt);
         }
     }
-    closedir(d);
+
+    closedir(root);
+    fflush(stdout);
 }
 
-void list_treasures(const char *hunt) {
-    DIR *d = opendir(hunt);
-    if (!d) {
-        printf("Hunt '%s' not found.\n", hunt);
+void enumerate_treasures(const char *hunt_name) {
+    DIR *hunt_dir = opendir(hunt_name);
+    if (!hunt_dir) {
+        printf("Hunt '%s' not found.\n", hunt_name);
         return;
     }
 
-    printf("Treasures in '%s':\n", hunt);
-    struct dirent *entry;
-    while ((entry = readdir(d))) {
-        if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
-            printf("- %s\n", entry->d_name);
+    printf("Treasures in hunt '%s':\n", hunt_name);
+    struct dirent *file;
+    while ((file = readdir(hunt_dir)) != NULL) {
+        if (file->d_type == DT_REG && is_valid_treasure(file->d_name)) {
+            printf(" - %s\n", file->d_name);
         }
     }
-    closedir(d);
+
+    closedir(hunt_dir);
+    fflush(stdout);
 }
 
-void view_treasure(const char *hunt, const char *id) {
-    char path[256];
-    snprintf(path, sizeof(path), "%s/%s", hunt, id);
-    FILE *f = fopen(path, "r");
+void show_treasure_content(const char *hunt, const char *treasure_id) {
+    char full_path[256];
+    snprintf(full_path, sizeof(full_path), "%s/%s", hunt, treasure_id);
+
+    FILE *f = fopen(full_path, "r");
     if (!f) {
-        printf("Treasure '%s' not found in hunt '%s'\n", id, hunt);
+        printf("Could not open treasure '%s' from hunt '%s'.\n", treasure_id, hunt);
         return;
     }
 
-    printf("Details of '%s' in '%s':\n", id, hunt);
-    char line[128];
-    while (fgets(line, sizeof(line), f)) {
-        printf("%s", line);
+    printf("Contents of treasure '%s' in hunt '%s':\n", treasure_id, hunt);
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), f)) {
+        printf("%s", buffer);
     }
+
     fclose(f);
+    fflush(stdout);
 }
 
-void handle_command(const char *cmd) {
-    char op[32], arg1[64], arg2[64];
-    int parts = sscanf(cmd, "%s %s %s", op, arg1, arg2);
+void process_command(const char *cmd) {
+    char action[64], param1[64], param2[64];
+    int arg_count = sscanf(cmd, "%s %s %s", action, param1, param2);
 
-    if (strcmp(op, "list_hunts") == 0) {
-        list_hunts();
-    } else if (strcmp(op, "list_treasures") == 0 && parts >= 2) {
-        list_treasures(arg1);
-    } else if (strcmp(op, "view_treasure") == 0 && parts == 3) {
-        view_treasure(arg1, arg2);
-    } else if (strcmp(op, "stop") == 0) {
-        printf("Shutting down monitor...\n");
-        usleep(500000);  // 0.5 sec
+    if (strcmp(action, "list_hunts") == 0) {
+        enumerate_hunts();
+    } else if (strcmp(action, "list_treasures") == 0 && arg_count >= 2) {
+        enumerate_treasures(param1);
+    } else if (strcmp(action, "view_treasure") == 0 && arg_count == 3) {
+        show_treasure_content(param1, param2);
+    } else if (strcmp(action, "stop") == 0) {
+        printf("Shutting down treasure monitor...\n");
+        fflush(stdout);
         exit(0);
     } else {
-        printf("Invalid or malformed command: %s\n", cmd);
+        printf("Invalid or unknown command: '%s'\n", cmd);
+        fflush(stdout);
     }
 }
 
 int main() {
     struct sigaction sa;
-    sa.sa_handler = sigusr1_handler;
+    sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
-    sigaction(SIGUSR1, &sa, NULL);
 
-    printf("Monitor running with PID %d\n", getpid());
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction");
+        return 1;
+    }
 
     while (1) {
-        if (got_command) {
-            got_command = 0;
+        if (signal_flag) {
+            signal_flag = 0;
 
-            FILE *f = fopen("monitor_command.cmd", "r");
-            if (!f) {
-                perror("Could not read command file");
+            FILE *cmd_file = fopen("monitor_command.cmd", "r");
+            if (!cmd_file) {
+                perror("Failed to open command file");
                 continue;
             }
 
-            char line[256];
-            if (fgets(line, sizeof(line), f)) {
-                line[strcspn(line, "\n")] = 0;
-                handle_command(line);
+            char command[256];
+            if (fgets(command, sizeof(command), cmd_file)) {
+                command[strcspn(command, "\n")] = '\0';
+                process_command(command);
             }
-            fclose(f);
+
+            fclose(cmd_file);
         }
+
         usleep(100000);
     }
 
